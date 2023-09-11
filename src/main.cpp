@@ -31,7 +31,7 @@ int main() {
             float x = (float)j * (600 / width) + 50;
             float y = (float)650 - i * (400 / height);
 
-            Atom atom = {x, y, x, y, false};
+            Atom atom = {x, y, x, y, false, 0};
             atoms.push_back(atom);
         }
     }

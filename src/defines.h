@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#define GRAVITY_CONSTANT -0.3
+#define GRAVITY_CONSTANT -0.25
 #define BOUNCE_CONSTANT 0.9
 #define FRICTION_CONSTANT 0.99
 
@@ -25,6 +25,7 @@ typedef struct atom {
     float oldx;
     float oldy;
     bool fixed;
+    int lock;
 } Atom;
 
 typedef struct bond {

@@ -25,9 +25,8 @@ __global__ void cudaUpdateAtoms(Atom* atoms, int size) {
 }
 
 void updateAtoms(Atom* atoms, int size) {
-    // //
     // https://stackoverflow.com/questions/9985912/how-do-i-choose-grid-and-block-dimensions-for-cuda-kernels
-    int blockSize = 1;  // The launch configurator returned block size
+    int blockSize;      // The launch configurator returned block size
     int minGridSize;    // The minimum grid size needed to achieve the maximum
                         // occupancy for a full device launch
     int gridSize;       // The actual grid size needed, based on input size
@@ -73,17 +72,18 @@ __global__ void cudaConstrainAtoms(Atom* atoms, int size) {
 }
 
 void constrainAtoms(Atom* atoms, int size) {
-    int blockSize = 1;
-    int minGridSize;
-    int gridSize;
+    int blockSize, minGridSize, gridSize;
 
     cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, cudaConstrainAtoms, 0, size);
     gridSize = (size + blockSize - 1) / blockSize;
 
-    Atom* cudaAtoms = nullptr;
+    Atom* cudaAtoms;
+
     cudaMalloc(&cudaAtoms, sizeof(Atom) * size);
     cudaMemcpy(cudaAtoms, atoms, sizeof(Atom) * size, cudaMemcpyHostToDevice);
+
     cudaConstrainAtoms<<<gridSize, blockSize>>>(cudaAtoms, size);
+    
     cudaMemcpy(atoms, cudaAtoms, sizeof(Atom) * size, cudaMemcpyDeviceToHost);
     cudaFree(cudaAtoms);
 }
@@ -100,7 +100,7 @@ __global__ void cudaDrawAtoms(Pixel* image, Atom* atoms, int size) {
 }
 
 void drawAtoms(Pixel* image, Atom* atoms, int size) {
-    int blockSize = 1;
+    int blockSize;
     int minGridSize;
     int gridSize;
 

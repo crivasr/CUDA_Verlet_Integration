@@ -4,6 +4,14 @@
 #include "bonds.cuh"
 #include "bonds.h"
 
+extern __device__ void wait(int* s) {
+    while(atomicCAS(s, 0, 1) != 0) {};
+}
+
+extern __device__ void signal(int* s) {
+    atomicExch(s, 0);
+}
+
 __global__ void cudaUpdateBonds(Bond* bonds, Atom* atoms, int size) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (idx >= size) return;
@@ -13,9 +21,12 @@ __global__ void cudaUpdateBonds(Bond* bonds, Atom* atoms, int size) {
     Atom* a = &atoms[bond->idxA];
     Atom* b = &atoms[bond->idxB];
 
+    wait(&(a->lock));
+    wait(&(b->lock));
+
     float aX = a->x;
     float aY = a->y;
-
+    
     float bX = b->x;
     float bY = b->y;
 
@@ -24,77 +35,38 @@ __global__ void cudaUpdateBonds(Bond* bonds, Atom* atoms, int size) {
 
     float dst = cudaDistance(a, b);
 
-    if (dst > BOND_BROKEN_DISTANCE) {
-        bond->broken = true;
-        return;
-    };
-
-    float difference = bond->length - dst;
-    float percent = difference / dst / 2;
-
-    float offsetX = dx * percent;
-    float offsetY = dy * percent;
-
-    if (!a->fixed) {
-        a->x = aX + offsetX;
-        a->y = aY + offsetY;
+    if (dst != 0) {
+        if (dst > BOND_BROKEN_DISTANCE) {
+            bond->broken = true;
+            signal(&(a->lock));
+            signal(&(b->lock));
+            return;
+        };
+        
+        float difference = bond->length - dst;
+        float percent = difference / dst / 2;
+        
+        float offsetX = dx * percent;
+        float offsetY = dy * percent;
+        
+        if (!a->fixed) {
+            a->x += offsetX;
+            a->y += offsetY;
+        }
+        
+        if (!b->fixed) {
+            b->x -= offsetX;
+            b->y -= offsetY;
+        }
     }
-    if (!b->fixed) {
-        b->x = bX - offsetX;
-        b->y = bY - offsetY;
-    }
+    
+    signal(&(a->lock));
+    signal(&(b->lock));
 }
 
 void updateBonds(Bond* bonds, Atom* atoms, int sizeBonds, int sizeAtoms) {
-#pragma omp parallel for
-    for (int idx = 0; idx < sizeBonds; idx++) {
-        Bond* bond = &bonds[idx];
-
-        if (bond->broken) continue;
-        Atom* a = &atoms[bond->idxA];
-        Atom* b = &atoms[bond->idxB];
-
-        float aX = a->x;
-        float aY = a->y;
-
-        float bX = b->x;
-        float bY = b->y;
-
-        float dx = aX - bX;
-        float dy = aY - bY;
-
-        float dst = distance(a, b);
-
-        if (dst > BOND_BROKEN_DISTANCE) {
-            bond->broken = true;
-            continue;
-        };
-
-        float difference = bond->length - dst;
-        float percent = difference / dst / 2;
-
-        float offsetX = dx * percent;
-        float offsetY = dy * percent;
-
-        if (!a->fixed) {
-            a->x = aX + offsetX;
-            a->y = aY + offsetY;
-        }
-        if (!b->fixed) {
-            b->x = bX - offsetX;
-            b->y = bY - offsetY;
-        }
-    }
-    return;
-    int blockSize = 1;
-    int minGridSize;
-    int gridSize;
-
-    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, cudaUpdateBonds, 0, sizeBonds);
-    gridSize = (sizeBonds + blockSize - 1) / blockSize;
-
-    Bond* cudaBonds = nullptr;
-    Atom* cudaAtoms = nullptr;
+    Bond* cudaBonds;
+    Atom* cudaAtoms;
 
     cudaMalloc(&cudaBonds, sizeof(Bond) * sizeBonds);
     cudaMalloc(&cudaAtoms, sizeof(Atom) * sizeAtoms);
@@ -102,7 +74,7 @@ void updateBonds(Bond* bonds, Atom* atoms, int sizeBonds, int sizeAtoms) {
     cudaMemcpy(cudaBonds, bonds, sizeof(Bond) * sizeBonds, cudaMemcpyHostToDevice);
     cudaMemcpy(cudaAtoms, atoms, sizeof(atom) * sizeAtoms, cudaMemcpyHostToDevice);
 
-    cudaUpdateBonds<<<gridSize, blockSize>>>(cudaBonds, cudaAtoms, sizeBonds);
+    cudaUpdateBonds<<<sizeBonds, 1>>>(cudaBonds, cudaAtoms, sizeBonds);
 
     cudaMemcpy(bonds, cudaBonds, sizeof(Bond) * sizeBonds, cudaMemcpyDeviceToHost);
     cudaMemcpy(atoms, cudaAtoms, sizeof(Atom) * sizeAtoms, cudaMemcpyDeviceToHost);
@@ -130,16 +102,14 @@ __global__ void cudaDrawBonds(Pixel* image, Bond* bonds, Atom* atoms, int size) 
 }
 
 void drawBonds(Pixel* image, Bond* bonds, Atom* atoms, int sizeBonds, int sizeAtoms) {
-    int blockSize = 1;
-    int minGridSize;
-    int gridSize;
+    int blockSize, minGridSize, gridSize;
 
     cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, cudaDrawBonds, 0, sizeBonds);
     gridSize = (sizeBonds + blockSize - 1) / blockSize;
 
-    Pixel* cudaImage = nullptr;
-    Bond* cudaBonds = nullptr;
-    Atom* cudaAtoms = nullptr;
+    Pixel* cudaImage;
+    Bond* cudaBonds;
+    Atom* cudaAtoms;
 
     cudaMalloc(&cudaImage, sizeof(Pixel) * WINDOW_HEIGHT * WINDOW_WIDTH);
     cudaMalloc(&cudaBonds, sizeof(Bond) * sizeBonds);
@@ -199,15 +169,13 @@ __global__ void cudaCutBonds(Bond* bonds, Atom* atoms, int size, Point point3, P
 }
 
 void cutBonds(Bond* bonds, Atom* atoms, int sizeBonds, int sizeAtoms, Point point3, Point point4) {
-    int blockSize = 1;
-    int minGridSize;
-    int gridSize;
+    int blockSize, minGridSize, gridSize;
 
     cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, cudaCutBonds, 0, sizeBonds);
     gridSize = (sizeBonds + blockSize - 1) / blockSize;
 
-    Bond* cudaBonds = nullptr;
-    Atom* cudaAtoms = nullptr;
+    Bond* cudaBonds;
+    Atom* cudaAtoms;
 
     cudaMalloc(&cudaBonds, sizeof(Bond) * sizeBonds);
     cudaMalloc(&cudaAtoms, sizeof(Atom) * sizeAtoms);

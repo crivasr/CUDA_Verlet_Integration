@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(Simulator)
 enable_language(CUDA)
-set (CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
 find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
@@ -23,7 +23,7 @@ include_directories("./src/gui")
 include_directories("./src/simulator")
 include_directories("./lib/glfw/include/GLFW")
 
-add_compile_options(-g -O3 -Wall -Wextra -fopenmp)
+add_compile_options(-g -O3 -Wall -Wextra -fopenmp -Wno-maybe-uninitialized)
 
 add_executable(Simulator ./src/main.cpp 
                          ./src/atoms/atoms.cu 
