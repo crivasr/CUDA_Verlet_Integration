@@ -2,11 +2,11 @@
 #include <thread>
 #include <vector>
 
-#include "../lib/glfw/include/GLFW/glfw3.h"
-#include "./atoms/atoms.h"
-#include "./bonds/bonds.h"
-#include "./draw/draw.h"
-#include "./gui/gui.h"
+#include "GLFW/glfw3.h"
+#include "atoms/atoms.cuh"
+#include "bonds/bonds.cuh"
+#include "draw/draw.cuh"
+#include "gui/gui.h"
 #include "defines.h"
 
 void eventThread(GLFWwindow* window) {
@@ -20,19 +20,24 @@ int main() {
     GLuint* texture = initTexture();
     Pixel* image = initImage();
 
-    std::vector<Atom> atoms;
-    std::vector<Bond> bonds;
+    int width = 300;
+    int height = 300;
 
-    int width = 100;
-    int height = 100;
+    int atomsSize = width*height;
+    int bondsSize = (width-1)*height + width*(height-1);
+
+    Atom* atoms;
+    Bond* bonds;
+
+    cudaMallocManaged((void**)&atoms, atomsSize * sizeof(Atom));
+    cudaMallocManaged((void**)&bonds, bondsSize * sizeof(Bond));
 
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             float x = (float)j * (600 / width) + 50;
             float y = (float)650 - i * (400 / height);
 
-            Atom atom = {x, y, x, y, false, 0};
-            atoms.push_back(atom);
+            atoms[i * width + j] = atom(x, y);
         }
     }
 
@@ -51,8 +56,7 @@ int main() {
 
             float dst = distance(a, b);
 
-            Bond bond = {idxA, idxB, dst, false};
-            bonds.push_back(bond);
+            bonds[i * (width - 1) + j] = bond(idxA, idxB, dst);
         }
     }
 
@@ -66,8 +70,7 @@ int main() {
 
             float dst = distance(a, b);
 
-            Bond bond = {idxA, idxB, dst, false};
-            bonds.push_back(bond);
+            bonds[(height - 1) * (width - 1) + i * width + j] = bond(idxA, idxB, dst);
         }
     }
 
@@ -76,22 +79,19 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        Atom* atomsArray = atoms.data();
-        Bond* bondsArray = bonds.data();
+        for (int _ = 0; _ < SUB_STEPS; _++) {
+            updateAtoms(atoms, atomsSize);
 
-        int atomsSize = atoms.size();
-        int bondsSize = bonds.size();
+            preSolve(atoms, atomsSize);
+            updateBonds(bonds, atoms, bondsSize);
+            postSolve(atoms, atomsSize);
 
-        updateAtoms(atomsArray, atomsSize);
-
-        for (int _ = 0; _ < BOND_UPDATES; _++) {
-            updateBonds(bondsArray, atomsArray, bondsSize, atomsSize);
+            constrainAtoms(atoms, atomsSize);
+            updateVelocity(atoms, atomsSize);
         }
-
-        constrainAtoms(atomsArray, atomsSize);
-
-        drawAtoms(image, atomsArray, atomsSize);
-        drawBonds(image, bondsArray, atomsArray, bondsSize, atomsSize);
+        
+        // drawAtoms(image, atoms, atomsSize);
+        drawBonds(image, bonds, atoms, bondsSize);
 
         drawImage(image, texture);
         clearImage(image);
